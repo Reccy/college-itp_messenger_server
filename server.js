@@ -17,101 +17,98 @@ var channelList = [];
 function broadcastNextChannel(client_uuid)
 {
     /* Create the channel name based off of the timestamp */
-    nextChannel = "chan_" + Date.now();
-    var alreadyConnected = false;
-
-    for (i = 0; i < channelList.length; i++)
+    nextChannel = "chan_" + client_uuid;
+    var alreadyOnList;
+    
+    for(i = 0; i < channelList.length; i++)
     {
-        if (channelList[i].uuid === client_uuid)
+        if(channelList[i].uuid === client_uuid)
         {
-            console.log(" > [" + globalChannel + "] USER " + client_uuid + " ALREADY CONNECTED");
-            alreadyConnected = true;
-            break;
+            alreadyOnList = true;
         }
     }
-
-    if (!alreadyConnected)
+    
+    if(!alreadyOnList)
     {
         channelList.push(
         {
             "uuid": client_uuid,
             "chan": nextChannel
         });
+    }
+    
+    /* Package the nextChannel into a JSON object, of type "initial connect" */
+    var msg = (
+    {
+        "m_type": "i_connect",
+        "uuid": client_uuid,
+        "channel": nextChannel
+    });
+    console.log(" > [" + globalChannel + "] BROADCASTING NEXT CHANNEL: " + JSON.stringify(msg));
 
-
-        /* Package the nextChannel into a JSON object, of type "initial connect" */
-        var msg = (
+    /* Send the nextChannel message across the global channel */
+    pubnub.publish(
+    {
+        channel: globalChannel,
+        message: msg,
+        callback: function(m)
         {
-            "m_type": "i_connect",
-            "uuid": client_uuid,
-            "channel": nextChannel
-        });
-        console.log(" > [" + globalChannel + "] BROADCASTING NEXT CHANNEL: " + JSON.stringify(msg));
-
-        /* Send the nextChannel message across the global channel */
-        pubnub.publish(
-        {
-            channel: globalChannel,
-            message: msg,
-            callback: function(m)
+            if (m[0] == "1")
             {
-                if (m[0] == "1")
-                {
-                    console.log(" > [" + globalChannel + "] MESSAGE SENT SUCCESSFULLY: " + m);
-                }
-                else
-                {
-                    console.log(" > [" + globalChannel + "] MESSAGE SENT FAILED: " + m);
-                }
+                console.log(" > [" + globalChannel + "] MESSAGE SENT SUCCESSFULLY: " + m);
             }
-        })
+            else
+            {
+                console.log(" > [" + globalChannel + "] MESSAGE SENT FAILED: " + m);
+            }
+        }
+    })
 
-        /* Subscribe to the nextChannel */
-        console.log(" > [" + nextChannel + "] ATTEMPTING CONNECTION...");
-        pubnub.subscribe(
+    /* Subscribe to the nextChannel */
+    console.log(" > [PRIVATE CHANNEL] ATTEMPTING CONNECTION...");
+    pubnub.subscribe(
+    {
+        channel: nextChannel,
+        message: function(m)
         {
-            channel: nextChannel,
-            message: function(m)
-            {
-                console.log(" > [" + nextChannel + "] MESSAGE RECEIVED: " + JSON.stringify(m));
-            },
-            connect: function(m)
-            {
-                console.log(" > [" + nextChannel + "] CONNECTED TO NEXT CHANNEL");
-            },
-            error: function(m)
-            {
-                m = JSON.stringify(m);
-                console.log(" > [" + nextChannel + "] CONNECTION ERROR: " + m);
-            },
-            presence: function(m)
-            {
-                console.log(" > [" + nextChannel + "] PRESENCE EVENT DETECTED: " + JSON.stringify(m));
+            console.log(" > [PRIVATE CHANNEL] MESSAGE RECEIVED: " + JSON.stringify(m));
+        },
+        connect: function(m)
+        {
+            console.log(" > [PRIVATE CHANNEL] CONNECTED TO NEXT CHANNEL");
+        },
+        error: function(m)
+        {
+            m = JSON.stringify(m);
+            console.log(" > [PRIVATE CHANNEL] CONNECTION ERROR: " + m);
+        },
+        presence: function(m)
+        {
+            console.log(" > [PRIVATE CHANNEL] PRESENCE EVENT DETECTED: " + JSON.stringify(m));
 
-                /* If someone leaves the channel, remove channel from the tracking list */
-                if (m.action === "leave" || m.action === "timeout")
+            /* If someone leaves the channel, remove channel from the tracking list */
+            if (m.action === "leave" || m.action === "timeout")
+            {
+                for (i = 0; i < channelList.length; i++)
                 {
-                    for (i = 0; i < channelList.length; i++)
+                    if (channelList[i].uuid === m.uuid)
                     {
-                        if (channelList[i].uuid === m.uuid)
+                        console.log(" > [" + channelList[i].chan + "] USER " + m.uuid + " LEFT AT " + m.timestamp);
+                        pubnub.unsubscribe(
                         {
-                            console.log(" > [" + channelList[i].chan + "] USER " + m.uuid + " LEFT AT " + m.timestamp);
-                            pubnub.unsubscribe(
+                            channel: channelList[i].chan,
+                            callback: function(m)
                             {
-                                channel: channelList[i].chan,
-                                callback: function(m)
-                                {
-                                    console.log(" > UNSUBSCRIBE CALLBACK: " + JSON.stringify(m));
-                                }
-                            });
-                            channelList.splice(i, 1);
-                            break;
-                        }
+                                console.log(" > UNSUBSCRIBE CALLBACK: " + JSON.stringify(m));
+                            }
+                        });
+                        channelList.splice(i, 1);
+                        break;
                     }
                 }
             }
-        })
-    }
+        }
+    });
 }
 
 /* Checks channel list to remove any dead channels */
@@ -184,7 +181,59 @@ function viewChannelList()
             console.log("UUID: " + channelList[i].uuid + " | CHAN: " + channelList[i].chan);
         }
     }
+    console.log("\nTOTAL CHANNELS: " + channelList.length);
     console.log("==============================================");
+}
+
+function shutdown()
+{
+    console.log("==========SHUTTING DOWN==========");
+    console.log(" > Sending shutdown message to GLOBAL CHANNEL");
+    
+    pubnub.publish({
+        channel: globalChannel,
+        message: {"m_type":"server_shutdown"},
+        callback: function(m)
+        {
+            console.log(" > Unsubscribing from GLOBAL CHANNEL");
+            pubnub.unsubscribe({
+                channel: globalChannel,
+                callback: function(m)
+                {
+                    console.log(" > Unsubscribed successfully!");
+                    console.log(" > Sending shutdown message to PRIVATE CHANNELS");
+                    if(channelList.length > 0)
+                    {
+                        var channelsConnected = channelList.length;
+                        var maxChannelsConnected = channelList.length;
+                        
+                        for(i = 0; i < maxChannelsConnected; i++)
+                        {
+                            pubnub.publish({
+                                channel: channelList[i].chan,
+                                message: {"m_type":"server_shutdown"},
+                                callback: function(m)
+                                {
+                                    channelsConnected--;
+                                    if(channelsConnected === 0)
+                                    {
+                                        console.log(" > SHUTDOWN COMPLETE!");
+                                        process.exit(0);
+                                    }
+                                }
+                            });
+                        }
+                    }
+                    else
+                    {
+                        console.log(" > No private channels connected!");
+                        console.log(" > SHUTDOWN COMPLETE!");
+                        process.exit(0);
+                    }
+                }
+            });
+        }
+    });
 }
 
 var stdin = process.openStdin();
@@ -210,6 +259,10 @@ stdin.on('data', function(input)
     else if (input === "verifyChannelList")
     {
         verifyChannelList();
+    }
+    else if (input === "shutdown")
+    {
+        shutdown();
     }
     else
     {
