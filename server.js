@@ -64,14 +64,32 @@ function broadcastNextChannel(client_uuid)
         }
     })
 
-    /* Subscribe to the nextChannel */
+    /* Subscribe to a PRIVATE CHANNEL */
     console.log(" > [PRIVATE CHANNEL] ATTEMPTING CONNECTION...");
     pubnub.subscribe(
     {
         channel: nextChannel,
         message: function(m)
         {
+            /*
+            *   Handle PRIVATE CHANNEL MESSAGES
+            */
             console.log(" > [PRIVATE CHANNEL] MESSAGE RECEIVED: " + JSON.stringify(m));
+            
+            if(m.m_type === "usr_test")
+            {
+                console.log(" > MESSAGE FROM: " + m.uuid + " || CONTENTS: " + m.contents);
+                
+                reply = m.contents.split("").reverse().join("");
+                
+                pubnub.publish({
+                    channel: "chan_" + m.uuid,
+                    message: {
+                        "m_type" : "usr_reply",
+                        "contents" : "Hi there! Here's what you said backwards: " + reply
+                    }
+                });
+            }
         },
         connect: function(m)
         {
