@@ -33,7 +33,8 @@ function broadcastNextChannel(client_uuid)
         channelList.push(
         {
             "uuid": client_uuid,
-            "chan": nextChannel
+            "chan": nextChannel,
+            "username": null
         });
     }
     
@@ -76,17 +77,20 @@ function broadcastNextChannel(client_uuid)
             */
             console.log(" > [PRIVATE CHANNEL] MESSAGE RECEIVED: " + JSON.stringify(m));
             
-            if(m.m_type === "usr_test")
+            if(m.m_type === "usr_login")
             {
-                console.log(" > MESSAGE FROM: " + m.uuid + " || CONTENTS: " + m.contents);
-                
-                reply = m.contents.split("").reverse().join("");
-                
                 pubnub.publish({
                     channel: "chan_" + m.uuid,
                     message: {
-                        "m_type" : "usr_reply",
-                        "contents" : "Hi there! Here's what you said backwards: " + reply
+                        "m_type" : "usr_login_reply",
+                        "username" : m.contents
+                    },
+                    callback: function() {
+                        for(i = 0; i < channelList.length; i++) {
+                            if(channelList[i].uuid === m.uuid) {
+                                channelList[i].username = m.contents;
+                            }
+                        }
                     }
                 });
             }
@@ -196,7 +200,7 @@ function viewChannelList()
     {
         for (i = 0; i < channelList.length; i++)
         {
-            console.log("UUID: " + channelList[i].uuid + " | CHAN: " + channelList[i].chan);
+            console.log("UUID: " + channelList[i].uuid + " | CHAN: " + channelList[i].chan + " | USERNAME: " + channelList[i].username);
         }
     }
     console.log("\nTOTAL CHANNELS: " + channelList.length);
@@ -290,7 +294,9 @@ stdin.on('data', function(input)
 
 /* DEBUG FUNCTIONS END */
 
+/****************/
 /* SERVER START */
+/****************/
 
 console.log(" > [" + globalChannel + "] ATTEMPTING CONNECTION...");
 
@@ -328,6 +334,9 @@ setInterval(function()
     verifyChannelList();
 }, 2 * 60 * 1000);
 
+/**************/
+/* SERVER END */
+/**************/
 
 /*****************************************************/
 /*****************************************************/
