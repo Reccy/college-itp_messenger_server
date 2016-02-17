@@ -94,6 +94,58 @@ function broadcastNextChannel(client_uuid)
                     }
                 });
             }
+            else if(m.m_type === "chat_start")
+            {
+                var receiverFound = false;
+                var targetChannel = null;
+                
+                //Check if receiver exists
+                for(i = 0; i < channelList.length; i++)
+                {
+                    if(channelList[i].username === m.receiver)
+                    {
+                        console.log(" > [PRIVATE CHANNEL] Receiver found!");
+                        receiverFound = true;
+                        targetChannel = m.receiver + "_" + m.sender;
+                        pubnub.publish({
+                            channel: "chan_" + channelList[i].uuid,
+                            message: {
+                                "m_type": "chat_init",
+                                "channel": targetChannel
+                            }
+                        })
+                        break;
+                    }
+                }
+            
+                //Send connect command to sender
+                for(i = 0; i < channelList.length; i++)
+                {
+                    if(channelList[i].username === m.sender)
+                    {
+                        if(receiverFound)
+                        {
+                            pubnub.publish({
+                                channel: "chan_" + channelList[i].uuid,
+                                message: {
+                                    "m_type": "chat_init",
+                                    "channel": targetChannel
+                                }
+                            })
+                        }
+                        else
+                        {
+                            pubnub.publish({
+                                channel: "chan_" + channelList[i].uuid,
+                                message: {
+                                    "m_type": "chat_start_error",
+                                    "error_message": "No User Found!"
+                                }
+                            })
+                        }
+                    }
+                }
+            }
         },
         connect: function(m)
         {
