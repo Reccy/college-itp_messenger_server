@@ -1,7 +1,7 @@
 /* Initialize pubnub and channel management */
 var pubnub = require("pubnub")(
 {
-    ssl: true, // <- enable TLS Tunneling over TCP
+    ssl: true, // Enable TLS Tunneling over TCP, allows the app to run on HTTPS servers.
     publish_key: "pub-c-0932089b-8fc7-4329-b03d-7c47fe828971",
     subscribe_key: "sub-c-a91c35f6-ca98-11e5-a9b2-02ee2ddab7fe",
     heartbeat: 30,
@@ -9,25 +9,28 @@ var pubnub = require("pubnub")(
 });
 
 /* Variables to manage channel */
-var globalChannel = "itp_test_channel_nodejs";
+var globalChannel = "chan_global";
 var nextChannel = "chan_temp";
 var channelList = [];
 
 /* Function to broadcast the next channel and subscribe to next channel */
 function broadcastNextChannel(client_uuid)
 {
-    /* Create the channel name based off of the timestamp */
+    /* Create the channel name based off of the client's UUID */
     nextChannel = "chan_" + client_uuid;
-    var alreadyOnList;
+    var alreadyOnList; //Bool to see if the channel is already connected to the server
     
+    //Iterate through the list to see if the channel is already there
     for(i = 0; i < channelList.length; i++)
     {
         if(channelList[i].uuid === client_uuid)
         {
             alreadyOnList = true;
+            break;
         }
     }
     
+    //If the user is not on the list, add them
     if(!alreadyOnList)
     {
         channelList.push(
@@ -38,16 +41,17 @@ function broadcastNextChannel(client_uuid)
         });
     }
     
-    /* Package the nextChannel into a JSON object, of type "initial connect" */
+    /* Package the next channel ID into a JSON object as a message, of type "initial connect" */
     var msg = (
     {
-        "m_type": "i_connect",
+        "m_type": "initial_connect",
         "uuid": client_uuid,
         "channel": nextChannel
     });
+    
     console.log(" > [" + globalChannel + "] BROADCASTING NEXT CHANNEL: " + JSON.stringify(msg));
 
-    /* Send the nextChannel message across the global channel */
+    /* Send the nextChannel message across the global channel for the client to pickup */
     pubnub.publish(
     {
         channel: globalChannel,
@@ -77,12 +81,12 @@ function broadcastNextChannel(client_uuid)
             */
             console.log(" > [PRIVATE CHANNEL] MESSAGE RECEIVED: " + JSON.stringify(m));
             
-            if(m.m_type === "usr_login")
+            if(m.m_type === "user_login")
             {
                 pubnub.publish({
                     channel: "chan_" + m.uuid,
                     message: {
-                        "m_type" : "usr_login_reply",
+                        "m_type" : "user_login_success",
                         "username" : m.contents
                     },
                     callback: function() {
@@ -138,7 +142,7 @@ function broadcastNextChannel(client_uuid)
                             pubnub.publish({
                                 channel: "chan_" + channelList[i].uuid,
                                 message: {
-                                    "m_type": "chat_start_error",
+                                    "m_type": "chat_error_no_users_found",
                                     "error_message": "No User Found!"
                                 }
                             })
@@ -216,7 +220,9 @@ function verifyChannelList()
     });
 }
 
+/*************************/
 /* DEBUG FUNCTIONS START */
+/*************************/
 
 function globalConnections()
 {
@@ -343,8 +349,9 @@ stdin.on('data', function(input)
         console.log(" > INVALID COMMAND!");
     }
 });
-
+/***********************/
 /* DEBUG FUNCTIONS END */
+/***********************/
 
 /****************/
 /* SERVER START */
