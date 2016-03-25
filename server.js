@@ -7,6 +7,9 @@ var database = mysql.createConnection({
     database : 'user_accounts'
 });
 
+/* Import hashing and salting package */
+var bcrypt = require("bcrypt");
+
 /* Initialize pubnub and channel management */
 var pubnub = require("pubnub")(
 {
@@ -111,23 +114,14 @@ function broadcastNextChannel(client_uuid)
                     database.query('SELECT * FROM Users', function(err, rows, fields) {
                         if (err) throw err;
                         
-                        console.log(rows[0].ID);
-                        console.log(rows[0].Username);
-                        console.log(rows[0].Password);
-                        console.log(rows.length);
-                        
                         for(i = 0; i < rows.length; i++) {
-                            console.log('USERNAME: ', rows[i].Username);
                             if(m.username === rows[i].Username) {
-                                console.log("USERNAME MATCHED!");
                                 if(m.password === rows[i].Password){
-                                    console.log("PASSWORD MATCHED!");
                                     loginSuccessful = true;
                                     break;
                                 }
                                 else
                                 {
-                                    console.log("PASSWORD MISS!");
                                     loginSuccessful = false;
                                     break;
                                 }
@@ -177,6 +171,30 @@ function broadcastNextChannel(client_uuid)
                         }
                     });
                 }
+            }
+            else if(m.m_type === "user_login_reconnect")
+            {
+                console.log("Reconnection from: " + m.username);
+                
+                for(i = 0; i < channelList.length; i++) {
+                    if(channelList[i].uuid === m.uuid) {
+                        channelList[i].username = m.username;
+                    }
+                }
+                console.log("Login Successful: " + m.username);
+                
+            }
+            else if(m.m_type === "user_logout")
+            {
+                console.log("Logout request from UUID: " + m.uuid);
+                
+                for(i = 0; i < channelList.length; i++) {
+                    if(channelList[i].uuid === m.uuid) {
+                        channelList[i].username = null;
+                    }
+                }
+                
+                console.log("Logout Successful: " + m.uuid);
             }
             else if(m.m_type === "chat_start")
             {
