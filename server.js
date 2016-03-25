@@ -1,3 +1,12 @@
+/* Setup database connection */
+var mysql = require("mysql");
+var database = mysql.createConnection({
+    host     : 'localhost',
+    user     : 'user_accounts_da',
+    password : 'j6na78EScAWdUpPH',
+    database : 'user_accounts'
+});
+
 /* Initialize pubnub and channel management */
 var pubnub = require("pubnub")(
 {
@@ -98,45 +107,63 @@ function broadcastNextChannel(client_uuid)
                 //If user is not already online, continue with the login process. Otherwise, notify the user.
                 if(!alreadyOnline)
                 {
-                    //If username has a match, test for password
-                    if(m.username === "TestUser123"){
-                        //If password matches, login is successful
-                        if(m.password === "Hello123"){
-                            loginSuccessful = true;
-                        }
-                    }
-                    
-                    //If login is successful, send message to user and add username to channelList
-                    if(loginSuccessful){
-                        pubnub.publish({
-                            channel: "chan_" + m.uuid,
-                            message: {
-                                "m_type" : "user_login_success",
-                                "username" : m.username
-                            },
-                            callback: function() {
-                                for(i = 0; i < channelList.length; i++) {
-                                    if(channelList[i].uuid === m.uuid) {
-                                        channelList[i].username = m.username;
-                                    }
+                    //Check the database to match the user's login details
+                    database.query('SELECT * FROM Users', function(err, rows, fields) {
+                        if (err) throw err;
+                        
+                        console.log(rows[0].ID);
+                        console.log(rows[0].Username);
+                        console.log(rows[0].Password);
+                        console.log(rows.length);
+                        
+                        for(i = 0; i < rows.length; i++) {
+                            console.log('USERNAME: ', rows[i].Username);
+                            if(m.username === rows[i].Username) {
+                                console.log("USERNAME MATCHED!");
+                                if(m.password === rows[i].Password){
+                                    console.log("PASSWORD MATCHED!");
+                                    loginSuccessful = true;
+                                    break;
                                 }
-                                console.log("Login Successful: " + m.username);
+                                else
+                                {
+                                    console.log("PASSWORD MISS!");
+                                    loginSuccessful = false;
+                                    break;
+                                }
                             }
-                        });
-                    }
-                    else
-                    {
-                        pubnub.publish({
-                            channel: "chan_" + m.uuid,
-                            message: {
-                                "m_type" : "user_login_failed"
-                            },
-                            callback: function() {
-                                console.log("UUID " + m.uuid);
-                                console.log("Login Failed: " + m.username);
-                            }
-                        });
-                    }
+                        }
+                        //If login is successful, send message to user and add username to channelList
+                        if(loginSuccessful){
+                            pubnub.publish({
+                                channel: "chan_" + m.uuid,
+                                message: {
+                                    "m_type" : "user_login_success",
+                                    "username" : m.username
+                                },
+                                callback: function() {
+                                    for(i = 0; i < channelList.length; i++) {
+                                        if(channelList[i].uuid === m.uuid) {
+                                            channelList[i].username = m.username;
+                                        }
+                                    }
+                                    console.log("Login Successful: " + m.username);
+                                }
+                            });
+                        }
+                        else
+                        {
+                            pubnub.publish({
+                                channel: "chan_" + m.uuid,
+                                message: {
+                                    "m_type" : "user_login_failed"
+                                },
+                                callback: function() {
+                                    console.log("Login Failed: " + m.username);
+                                }
+                            });
+                        }
+                    });
                 }
                 else
                 {
@@ -360,6 +387,8 @@ function shutdown()
                     else
                     {
                         console.log(" > No private channels connected!");
+                        console.log(" > Disconnecting from Databasse");
+                        database.end();
                         console.log(" > SHUTDOWN COMPLETE!");
                         process.exit(0);
                     }
@@ -411,6 +440,9 @@ stdin.on('data', function(input)
 /****************/
 
 console.log(" > [" + globalChannel + "] ATTEMPTING CONNECTION...");
+
+//Connect to the database)
+database.connect();
 
 /* Create GLOBAL CHANNEL */
 pubnub.subscribe(
