@@ -83,20 +83,73 @@ function broadcastNextChannel(client_uuid)
             
             if(m.m_type === "user_login")
             {
-                pubnub.publish({
-                    channel: "chan_" + m.uuid,
-                    message: {
-                        "m_type" : "user_login_success",
-                        "username" : m.contents
-                    },
-                    callback: function() {
-                        for(i = 0; i < channelList.length; i++) {
-                            if(channelList[i].uuid === m.uuid) {
-                                channelList[i].username = m.contents;
-                            }
+                console.log("Login attempt from: " + m.username + " at chan_" + m.uuid);
+                
+                var loginSuccessful = false;
+                var alreadyOnline = false;
+                
+                //Check if user is already online on another client
+                for(i = 0; i < channelList.length; i++) {
+                    if(channelList[i].username === m.username) {
+                        alreadyOnline = true;
+                    }
+                }
+                
+                //If user is not already online, continue with the login process. Otherwise, notify the user.
+                if(!alreadyOnline)
+                {
+                    //If username has a match, test for password
+                    if(m.username === "TestUser123"){
+                        //If password matches, login is successful
+                        if(m.password === "Hello123"){
+                            loginSuccessful = true;
                         }
                     }
-                });
+                    
+                    //If login is successful, send message to user and add username to channelList
+                    if(loginSuccessful){
+                        pubnub.publish({
+                            channel: "chan_" + m.uuid,
+                            message: {
+                                "m_type" : "user_login_success",
+                                "username" : m.username
+                            },
+                            callback: function() {
+                                for(i = 0; i < channelList.length; i++) {
+                                    if(channelList[i].uuid === m.uuid) {
+                                        channelList[i].username = m.username;
+                                    }
+                                }
+                                console.log("Login Successful: " + m.username);
+                            }
+                        });
+                    }
+                    else
+                    {
+                        pubnub.publish({
+                            channel: "chan_" + m.uuid,
+                            message: {
+                                "m_type" : "user_login_failed"
+                            },
+                            callback: function() {
+                                console.log("UUID " + m.uuid);
+                                console.log("Login Failed: " + m.username);
+                            }
+                        });
+                    }
+                }
+                else
+                {
+                    pubnub.publish({
+                        channel: "chan_" + m.uuid,
+                        message: {
+                            "m_type" : "user_login_duplicate"
+                        },
+                        callback: function() {
+                            console.log("Login Failed [Already Online]: " + m.username);
+                        }
+                    });
+                }
             }
             else if(m.m_type === "chat_start")
             {
