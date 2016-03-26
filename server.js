@@ -193,7 +193,6 @@ function broadcastNextChannel(client_uuid)
                     }
                 }
                 console.log("Login Successful: " + username);
-                
             }
             else if(m.m_type === "user_logout")
             {
