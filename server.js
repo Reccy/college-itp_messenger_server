@@ -196,6 +196,66 @@ function broadcastNextChannel(client_uuid)
                 
                 console.log("Logout Successful: " + m.uuid);
             }
+            else if(m.m_type === "user_register")
+            {
+                console.log("Register attempt from: " + m.username + " at chan_" + m.uuid);
+                
+                var userAlreadyExists = false;
+                
+                //Check the database to see if user already exists
+                database.query("SELECT * FROM Users;", function(err, rows, fields) {
+                    if (err) throw err;
+                    
+                    //Check if user already exists    
+                    for(i = 0; i < rows.length; i++) {
+                        if(m.username === rows[i].Username) {
+                            userAlreadyExists = true;
+                        }
+                    }
+                    
+                    //If the user doesn't exist, continue with registration. Otherwise, notify client of error
+                    if(!userAlreadyExists){
+                        sqlQuery = "INSERT INTO Users (ID, Username, Password) VALUES ('" + rows.length + "','" + m.username + "','" + m.password + "');";
+                        console.log("INSERT QUERY: " + sqlQuery);
+                        
+                        //Add user to database
+                        database.query(sqlQuery), function (err, rows, fields) {
+                            if(err) throw err;
+                        }
+                        
+                        console.log("USER REGISTERED SUCCESSFULLY!");
+                            
+                        pubnub.publish({
+                            channel: "chan_" + m.uuid,
+                            message: {
+                                "m_type" : "user_register_success",
+                                "username" : m.username
+                            },
+                            callback: function() {
+                                for(i = 0; i < channelList.length; i++) {
+                                    if(channelList[i].uuid === m.uuid) {
+                                        channelList[i].username = m.username;
+                                    }
+                                }
+                                
+                                console.log("Register Successful: " + m.username);
+                            }
+                        });
+                    }
+                    else
+                    {
+                        pubnub.publish({
+                            channel: "chan_" + m.uuid,
+                            message: {
+                                "m_type" : "user_register_duplicate"
+                            },
+                            callback: function() {
+                                console.log("Register Failed [Duplicate User]: " + m.username);
+                            }
+                        });
+                    }
+                });
+            }
             else if(m.m_type === "chat_start")
             {
                 var receiverFound = false;
