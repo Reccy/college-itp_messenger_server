@@ -7,8 +7,11 @@ var database = mysql.createConnection({
     database : 'user_accounts'
 });
 
+/* Setup input sanitizer */
+var sanitizer = require("sanitizer");
+
 /* Import hashing and salting package */
-var bcrypt = require("bcrypt");
+var bcrypt = require("bcryptjs");
 
 /* Initialize pubnub and channel management */
 var pubnub = require("pubnub")(
@@ -16,7 +19,7 @@ var pubnub = require("pubnub")(
     ssl: true, // Enable TLS Tunneling over TCP, allows the app to run on HTTPS servers.
     publish_key: "pub-c-0932089b-8fc7-4329-b03d-7c47fe828971",
     subscribe_key: "sub-c-a91c35f6-ca98-11e5-a9b2-02ee2ddab7fe",
-    heartbeat: 30,
+    heartbeat: 10,
     uuid: "SERVER"
 });
 
@@ -95,14 +98,18 @@ function broadcastNextChannel(client_uuid)
             
             if(m.m_type === "user_login")
             {
-                console.log("Login attempt from: " + m.username + " at chan_" + m.uuid);
+                username = sanitizer.escape(m.username);
+                uuid = m.uuid;
+                password = sanitizer.escape(m.password);
+                
+                console.log("Login attempt from: " + username + " at chan_" + uuid);
                 
                 var loginSuccessful = false;
                 var alreadyOnline = false;
                 
                 //Check if user is already online on another client
                 for(i = 0; i < channelList.length; i++) {
-                    if(channelList[i].username === m.username) {
+                    if(channelList[i].username === username) {
                         alreadyOnline = true;
                     }
                 }
@@ -115,8 +122,9 @@ function broadcastNextChannel(client_uuid)
                         if (err) throw err;
                         
                         for(i = 0; i < rows.length; i++) {
-                            if(m.username === rows[i].Username) {
-                                if(m.password === rows[i].Password){
+                            if(username === rows[i].Username) {
+                                if(bcrypt.compareSync(password, rows[i].Password))
+                                {
                                     loginSuccessful = true;
                                     break;
                                 }
@@ -130,30 +138,30 @@ function broadcastNextChannel(client_uuid)
                         //If login is successful, send message to user and add username to channelList
                         if(loginSuccessful){
                             pubnub.publish({
-                                channel: "chan_" + m.uuid,
+                                channel: "chan_" + uuid,
                                 message: {
                                     "m_type" : "user_login_success",
-                                    "username" : m.username
+                                    "username" : username
                                 },
                                 callback: function() {
                                     for(i = 0; i < channelList.length; i++) {
-                                        if(channelList[i].uuid === m.uuid) {
-                                            channelList[i].username = m.username;
+                                        if(channelList[i].uuid === uuid) {
+                                            channelList[i].username = username;
                                         }
                                     }
-                                    console.log("Login Successful: " + m.username);
+                                    console.log("Login Successful: " + username);
                                 }
                             });
                         }
                         else
                         {
                             pubnub.publish({
-                                channel: "chan_" + m.uuid,
+                                channel: "chan_" + uuid,
                                 message: {
                                     "m_type" : "user_login_failed"
                                 },
                                 callback: function() {
-                                    console.log("Login Failed: " + m.username);
+                                    console.log("Login Failed: " + username);
                                 }
                             });
                         }
@@ -162,43 +170,56 @@ function broadcastNextChannel(client_uuid)
                 else
                 {
                     pubnub.publish({
-                        channel: "chan_" + m.uuid,
+                        channel: "chan_" + uuid,
                         message: {
                             "m_type" : "user_login_duplicate"
                         },
                         callback: function() {
-                            console.log("Login Failed [Already Online]: " + m.username);
+                            console.log("Login Failed [Already Online]: " + username);
                         }
                     });
                 }
             }
             else if(m.m_type === "user_login_reconnect")
             {
-                console.log("Reconnection from: " + m.username);
+                username = sanitizer.escape(m.username);
+                uuid = m.uuid;
+                
+                console.log("Reconnection from: " + username);
                 
                 for(i = 0; i < channelList.length; i++) {
-                    if(channelList[i].uuid === m.uuid) {
-                        channelList[i].username = m.username;
+                    if(channelList[i].uuid === uuid) {
+                        channelList[i].username = username;
                     }
                 }
-                console.log("Login Successful: " + m.username);
+                console.log("Login Successful: " + username);
                 
             }
             else if(m.m_type === "user_logout")
             {
-                console.log("Logout request from UUID: " + m.uuid);
+                username = sanitizer.escape(m.username);
+                uuid = m.uuid;
+                
+                console.log("Logout request from UUID: " + uuid);
                 
                 for(i = 0; i < channelList.length; i++) {
-                    if(channelList[i].uuid === m.uuid) {
+                    if(channelList[i].uuid === uuid) {
                         channelList[i].username = null;
                     }
                 }
                 
-                console.log("Logout Successful: " + m.uuid);
+                console.log("Logout Successful: " + uuid);
             }
             else if(m.m_type === "user_register")
             {
-                console.log("Register attempt from: " + m.username + " at chan_" + m.uuid);
+                username = sanitizer.escape(m.username);
+                uuid = m.uuid;
+                password = sanitizer.escape(m.password);
+                password = bcrypt.hashSync(password, 8);
+                
+                console.log("HASHED PASSWORD: " + password);
+                
+                console.log("Register attempt from: " + username + " at chan_" + uuid);
                 
                 var userAlreadyExists = false;
                 
@@ -208,14 +229,14 @@ function broadcastNextChannel(client_uuid)
                     
                     //Check if user already exists    
                     for(i = 0; i < rows.length; i++) {
-                        if(m.username === rows[i].Username) {
+                        if(username === rows[i].Username) {
                             userAlreadyExists = true;
                         }
                     }
                     
                     //If the user doesn't exist, continue with registration. Otherwise, notify client of error
                     if(!userAlreadyExists){
-                        sqlQuery = "INSERT INTO Users (ID, Username, Password) VALUES ('" + rows.length + "','" + m.username + "','" + m.password + "');";
+                        sqlQuery = "INSERT INTO Users (ID, Username, Password) VALUES ('" + rows.length + "','" + username + "','" + password + "');";
                         console.log("INSERT QUERY: " + sqlQuery);
                         
                         //Add user to database
@@ -226,31 +247,31 @@ function broadcastNextChannel(client_uuid)
                         console.log("USER REGISTERED SUCCESSFULLY!");
                             
                         pubnub.publish({
-                            channel: "chan_" + m.uuid,
+                            channel: "chan_" + uuid,
                             message: {
                                 "m_type" : "user_register_success",
-                                "username" : m.username
+                                "username" : username
                             },
                             callback: function() {
                                 for(i = 0; i < channelList.length; i++) {
-                                    if(channelList[i].uuid === m.uuid) {
-                                        channelList[i].username = m.username;
+                                    if(channelList[i].uuid === uuid) {
+                                        channelList[i].username = username;
                                     }
                                 }
                                 
-                                console.log("Register Successful: " + m.username);
+                                console.log("Register Successful: " + username);
                             }
                         });
                     }
                     else
                     {
                         pubnub.publish({
-                            channel: "chan_" + m.uuid,
+                            channel: "chan_" + uuid,
                             message: {
                                 "m_type" : "user_register_duplicate"
                             },
                             callback: function() {
-                                console.log("Register Failed [Duplicate User]: " + m.username);
+                                console.log("Register Failed [Duplicate User]: " + username);
                             }
                         });
                     }
