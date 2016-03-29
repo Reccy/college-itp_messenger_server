@@ -26,6 +26,8 @@ var pubnub = require("pubnub")(
 /* Variables to manage channel */
 var globalChannel = "chan_global";
 var nextChannel = "chan_temp";
+var dbChannel = "chan_database";
+var userlist = []; //Full list of users from the database
 var channelList = [];
 
 /* Function to broadcast the next channel and subscribe to next channel */
@@ -259,6 +261,7 @@ function broadcastNextChannel(client_uuid)
                                 }
                                 
                                 console.log("Register Successful: " + username);
+                                updateUsernameList();
                             }
                         });
                     }
@@ -486,9 +489,10 @@ function shutdown()
                     {
                         console.log(" > No private channels connected!");
                         console.log(" > Disconnecting from Databasse");
-                        database.end();
-                        console.log(" > SHUTDOWN COMPLETE!");
-                        process.exit(0);
+                        database.end(function(err){
+                            console.log(" > SHUTDOWN COMPLETE!");
+                            process.exit(0);
+                        });
                     }
                 }
             });
@@ -537,44 +541,80 @@ stdin.on('data', function(input)
 /* SERVER START */
 /****************/
 
-console.log(" > [" + globalChannel + "] ATTEMPTING CONNECTION...");
+console.log(" > [" + globalChannel + "] ATTEMPTING CONNECTION TO DATABASE");
 
-//Connect to the database)
-database.connect();
-
-/* Create GLOBAL CHANNEL */
-pubnub.subscribe(
-{
-    channel: globalChannel,
-    message: function(m)
+//Connect to the database
+database.connect(function(err){
+    if (err){
+        console.log(" > [" + globalChannel + "] ERROR CONNECTING TO DATABASE. SHUTTING DOWN!");
+        shutdown();
+    }
+    else
     {
-        console.log(" > [" + globalChannel + "] MESSAGE RECEIVED: " + JSON.stringify(m));
-    },
-    connect: function(m)
-    {
-        console.log(" > [" + globalChannel + "] CONNECTED TO GLOBAL CHANNEL");
-    },
-    error: function(error)
-    {
-        console.log(JSON.stringify(error));
-    },
-    presence: function(m)
-    {
-        console.log(" > [" + globalChannel + "] PRESENCE EVENT DETECTED: " + JSON.stringify(m));
-
-        /* If a user joins the channel, allocate them a private channel */
-        if (m.uuid !== "SERVER" && m.action === "join")
-        {
-            broadcastNextChannel(m.uuid);
-        }
+        console.log(" > [" + globalChannel + "] CONNECTED TO DATABASE!");
+        updateUsernameList();
     }
 });
 
-/* Check channel list every 2 minutes */
-setInterval(function()
-{
-    verifyChannelList();
-}, 2 * 60 * 1000);
+function updateUsernameList(){
+    database.query('SELECT Username FROM Users', function (err, rows, fields) {
+        if(err) throw err;
+        
+        console.log(" > [" + globalChannel + "] GETTING LIST OF USERS");
+        
+        userlist.length = 0;
+        for(i = 0; i < rows.length; i++){
+            userlist.push(rows[i].Username);
+        }
+        
+        console.log(" > [" + dbChannel + "] BROADCASTING DATABASE CHANGES");
+        
+        pubnub.publish({
+            channel: dbChannel,
+            message: {
+                "m_type" : "db_results",
+                "usernames" : userlist
+            }
+        });
+
+        createGlobalChannel();
+    });
+}
+
+function createGlobalChannel(){
+    pubnub.subscribe(
+    {
+        channel: globalChannel,
+        message: function(m)
+        {
+            console.log(" > [" + globalChannel + "] MESSAGE RECEIVED: " + JSON.stringify(m));
+        },
+        connect: function(m)
+        {
+            console.log(" > [" + globalChannel + "] CONNECTED TO GLOBAL CHANNEL");
+        },
+        error: function(error)
+        {
+            console.log(JSON.stringify(error));
+        },
+        presence: function(m)
+        {
+            console.log(" > [" + globalChannel + "] PRESENCE EVENT DETECTED: " + JSON.stringify(m));
+    
+            /* If a user joins the channel, allocate them a private channel */
+            if (m.uuid !== "SERVER" && m.action === "join")
+            {
+                broadcastNextChannel(m.uuid);
+            }
+        }
+    });
+    /* Check channel list every 2 minutes */
+    setInterval(function()
+    {
+        verifyChannelList();
+    }, 2 * 60 * 1000);
+}
+
 
 /**************/
 /* SERVER END */
