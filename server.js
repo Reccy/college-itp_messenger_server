@@ -290,6 +290,12 @@ function broadcastNextChannel(client_uuid)
                 
                 console.log("NEW CHAT FROM " + sender + " TO " + receiver);
                 
+                //Creates a channel based on the two usernames, will always be the same for this user pair
+                sortedUsernames = m.usernames;
+                sortedUsernames.sort();
+                console.log("SORTED USERNAMES: " + sortedUsernames);
+                targetChannel = asciiEncode(sortedUsernames[0] + sortedUsernames[1]) + "001";
+                
                 //Check if receiver exists
                 for(i = 0; i < channelList.length; i++)
                 {
@@ -298,12 +304,6 @@ function broadcastNextChannel(client_uuid)
                     {
                         console.log(" > [PRIVATE CHANNEL] Receiver found!");
                         receiverFound = true;
-                        
-                        //Creates a channel based on the two usernames, will always be the same for this user pair
-                        sortedUsernames = m.usernames;
-                        sortedUsernames.sort();
-                        console.log("SORTED USERNAMES: " + sortedUsernames);
-                        targetChannel = asciiEncode(sortedUsernames[0] + sortedUsernames[1]);
                         
                         console.log("NEW CHANNEL CREATED: " + targetChannel);
                         console.log("SENDING MESSAGE TO: chan_" + matchedChannel.uuid + " as " + matchedChannel.username);
@@ -320,13 +320,78 @@ function broadcastNextChannel(client_uuid)
                         break;
                     }
                 }
-            
-                //Send connect command to sender
-                for(i = 0; i < channelList.length; i++)
+                var receiverChannelList = []; //Array to store the channel list of the receiver
+                
+                if(!receiverFound)
                 {
-                    if(channelList[i].username === sender)
+                    for(i = 0; i < userlist.length; i++)
                     {
-                        if(receiverFound)
+                        if(userlist[i] === receiver)
+                        {
+                            receiverFound = true;
+                            pubnub.history({
+                                channel : receiver + "_hChan",
+                                callback : function(m){
+                                    console.log("M - " + m[0][0]);
+                                    if(m[0][0] !== undefined){
+                                        receiverChannelList = m[0][0];
+                                    } else {
+                                        receiverChannelList = [];
+                                    }
+                                    
+                                    console.log("PUSHING");
+                                    receiverChannelList.push({
+                                        "username": sender,
+                                        "channel": targetChannel
+                                    });
+                                    
+                                    console.log("NEW RECEIVER CHANNEL LIST: " + receiverChannelList);
+                                    
+                                    pubnub.publish({
+                                        channel: receiver + "_hChan",
+                                        message: receiverChannelList,
+                                        callback: function(){
+                                            console.log(receiver + "'s Channel List updated!");
+                                        }
+                                    });
+                                    
+                                    //Send connect command to sender
+                                    for(i = 0; i < channelList.length; i++)
+                                    {
+                                        if(channelList[i].username === sender)
+                                        {
+                                            console.log("SENDING MESSAGE TO: chan_" + channelList[i].uuid + " as " + channelList[i].username);
+                                            pubnub.publish({
+                                                channel: "chan_" + channelList[i].uuid,
+                                                message: {
+                                                    "m_type": "chat_init",
+                                                    "channel": targetChannel,
+                                                    "username": receiver
+                                                }
+                                            });
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    }
+                    if(!receiverFound)
+                    {
+                        for(i = 0; i < channelList.length; i++)
+                        {
+                            pubnub.publish({
+                                channel: "chan_" + channelList[i].uuid,
+                                message: {
+                                    "m_type": "chat_error_no_users_found"
+                                }
+                            });
+                        }
+                    }
+                } else {
+                    //Send connect command to sender
+                    for(i = 0; i < channelList.length; i++)
+                    {
+                        if(channelList[i].username === sender)
                         {
                             console.log("SENDING MESSAGE TO: chan_" + channelList[i].uuid + " as " + channelList[i].username);
                             pubnub.publish({
@@ -336,16 +401,7 @@ function broadcastNextChannel(client_uuid)
                                     "channel": targetChannel,
                                     "username": receiver
                                 }
-                            })
-                        }
-                        else
-                        {
-                            pubnub.publish({
-                                channel: "chan_" + channelList[i].uuid,
-                                message: {
-                                    "m_type": "chat_error_no_users_found"
-                                }
-                            })
+                            });
                         }
                     }
                 }
