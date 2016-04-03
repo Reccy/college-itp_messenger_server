@@ -294,7 +294,7 @@ function broadcastNextChannel(client_uuid)
                 sortedUsernames = m.usernames;
                 sortedUsernames.sort();
                 console.log("SORTED USERNAMES: " + sortedUsernames);
-                targetChannel = asciiEncode(sortedUsernames[0] + sortedUsernames[1]) + "001";
+                targetChannel = asciiEncode(sortedUsernames[0] + sortedUsernames[1]) + "001"; //If history needs to be changed, increment the tail number. To clear channel history, change the name of the _hChan prefix.
                 
                 //Check if receiver exists
                 for(i = 0; i < channelList.length; i++)
