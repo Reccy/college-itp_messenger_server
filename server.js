@@ -30,6 +30,87 @@ var dbChannel = "chan_database";
 var userlist = []; //Full list of users from the database
 var channelList = [];
 
+
+/****************/
+/* SERVER START */
+/****************/
+
+console.log(" > [" + globalChannel + "] ATTEMPTING CONNECTION TO DATABASE");
+
+//Connect to the database
+database.connect(function(err){
+    if (err){
+        console.log(" > [" + globalChannel + "] ERROR CONNECTING TO DATABASE. SHUTTING DOWN!");
+        shutdown();
+    }
+    else
+    {
+        console.log(" > [" + globalChannel + "] CONNECTED TO DATABASE!");
+        updateUsernameList();
+    }
+});
+
+//Updates the username list
+function updateUsernameList(){
+    database.query('SELECT Username FROM Users', function (err, rows, fields) {
+        if(err) throw err;
+        
+        console.log(" > [" + globalChannel + "] GETTING LIST OF USERS");
+        
+        userlist.length = 0;
+        for(i = 0; i < rows.length; i++){
+            userlist.push(rows[i].Username);
+        }
+        
+        console.log(" > [" + dbChannel + "] BROADCASTING DATABASE CHANGES");
+        
+        pubnub.publish({
+            channel: dbChannel,
+            message: {
+                "m_type" : "db_results",
+                "usernames" : userlist
+            }
+        });
+
+        createGlobalChannel();
+    });
+}
+
+//Creates the global channel
+function createGlobalChannel(){
+    pubnub.subscribe(
+    {
+        channel: globalChannel,
+        message: function(m)
+        {
+            console.log(" > [" + globalChannel + "] MESSAGE RECEIVED: " + JSON.stringify(m));
+        },
+        connect: function(m)
+        {
+            console.log(" > [" + globalChannel + "] CONNECTED TO GLOBAL CHANNEL");
+        },
+        error: function(error)
+        {
+            console.log(JSON.stringify(error));
+        },
+        presence: function(m)
+        {
+            console.log(" > [" + globalChannel + "] PRESENCE EVENT DETECTED: " + JSON.stringify(m));
+    
+            /* If a user joins the channel, allocate them a private channel */
+            if (m.uuid !== "SERVER" && m.action === "join")
+            {
+                broadcastNextChannel(m.uuid);
+            }
+        }
+    });
+    /* Check channel list every 2 minutes */
+    setInterval(function()
+    {
+        verifyChannelList();
+    }, 2 * 60 * 1000);
+}
+
 /* Function to broadcast the next channel and subscribe to next channel */
 function broadcastNextChannel(client_uuid)
 {
@@ -123,6 +204,7 @@ function broadcastNextChannel(client_uuid)
                     database.query('SELECT * FROM Users', function(err, rows, fields) {
                         if (err) throw err;
                         
+                        //Check if the username exists
                         for(i = 0; i < rows.length; i++) {
                             if(username === rows[i].Username) {
                                 if(bcrypt.compareSync(password, rows[i].Password))
@@ -157,6 +239,7 @@ function broadcastNextChannel(client_uuid)
                         }
                         else
                         {
+                            //Otherwise, notify the user that they have failed a login
                             pubnub.publish({
                                 channel: "chan_" + uuid,
                                 message: {
@@ -171,6 +254,7 @@ function broadcastNextChannel(client_uuid)
                 }
                 else
                 {
+                    //Otherwise notify the user that they are already online on another device
                     pubnub.publish({
                         channel: "chan_" + uuid,
                         message: {
@@ -182,6 +266,7 @@ function broadcastNextChannel(client_uuid)
                     });
                 }
             }
+            //Log the user back in
             else if(m.m_type === "user_login_reconnect")
             {
                 username = sanitizer.escape(m.username);
@@ -196,6 +281,7 @@ function broadcastNextChannel(client_uuid)
                 }
                 console.log("Login Successful: " + username);
             }
+            //Log the usero ut
             else if(m.m_type === "user_logout")
             {
                 username = sanitizer.escape(m.username);
@@ -211,8 +297,10 @@ function broadcastNextChannel(client_uuid)
                 
                 console.log("Logout Successful: " + uuid);
             }
+            //Register a new user
             else if(m.m_type === "user_register")
             {
+                //Sanitize the username and Hash&Salt the password
                 username = sanitizer.escape(m.username);
                 uuid = m.uuid;
                 password = sanitizer.escape(m.password);
@@ -246,7 +334,8 @@ function broadcastNextChannel(client_uuid)
                         }
                         
                         console.log("USER REGISTERED SUCCESSFULLY!");
-                            
+                        
+                        //Notify the user of a successful registration
                         pubnub.publish({
                             channel: "chan_" + uuid,
                             message: {
@@ -267,6 +356,7 @@ function broadcastNextChannel(client_uuid)
                     }
                     else
                     {
+                        //Otherwise, notify the user of a duplicate user
                         pubnub.publish({
                             channel: "chan_" + uuid,
                             message: {
@@ -279,14 +369,15 @@ function broadcastNextChannel(client_uuid)
                     }
                 });
             }
+            //Connect the two users to each other
             else if(m.m_type === "chat_start")
             {
                 var receiverFound = false; //If the receiver has been found
                 var targetChannel = null; //The ID of the target channel
                 var sortedUsernames = null; //Array of sorted usernames
                 var matchedChannel = null; //Channel matched in loops
-                var sender = m.usernames[0];
-                var receiver = m.usernames[1];
+                var sender = m.usernames[0]; //Sender's username
+                var receiver = m.usernames[1]; //Receiver's username
                 
                 console.log("NEW CHAT FROM " + sender + " TO " + receiver);
                 
@@ -320,12 +411,16 @@ function broadcastNextChannel(client_uuid)
                         break;
                     }
                 }
-                var receiverChannelList = []; //Array to store the channel list of the receiver
                 
+                //Array to store the channel list of the receiver
+                var receiverChannelList = []; 
+                
+                //If the receiver has not been found, check the userlist for the receiver.
                 if(!receiverFound)
                 {
                     for(i = 0; i < userlist.length; i++)
                     {
+                        //If the receiver is found, add them to the receiver's channel list
                         if(userlist[i] === receiver)
                         {
                             receiverFound = true;
@@ -333,6 +428,7 @@ function broadcastNextChannel(client_uuid)
                                 channel : receiver + "_hChan",
                                 callback : function(m){
                                     console.log("M - " + m[0][0]);
+                                    
                                     if(m[0][0] !== undefined){
                                         receiverChannelList = m[0][0];
                                     } else {
@@ -340,6 +436,8 @@ function broadcastNextChannel(client_uuid)
                                     }
                                     
                                     console.log("PUSHING");
+                                    
+                                    //Update the receiver's channel list
                                     receiverChannelList.push({
                                         "username": sender,
                                         "channel": targetChannel
@@ -347,6 +445,7 @@ function broadcastNextChannel(client_uuid)
                                     
                                     console.log("NEW RECEIVER CHANNEL LIST: " + receiverChannelList);
                                     
+                                    //Upload the receiver's channel list
                                     pubnub.publish({
                                         channel: receiver + "_hChan",
                                         message: receiverChannelList,
@@ -358,6 +457,7 @@ function broadcastNextChannel(client_uuid)
                                     //Send connect command to sender
                                     for(i = 0; i < channelList.length; i++)
                                     {
+                                        //If the username is the sender, send the chat init message to the sender
                                         if(channelList[i].username === sender)
                                         {
                                             console.log("SENDING MESSAGE TO: chan_" + channelList[i].uuid + " as " + channelList[i].username);
@@ -375,6 +475,7 @@ function broadcastNextChannel(client_uuid)
                             });
                         }
                     }
+                    //If the receiver is still not found, notify the user
                     if(!receiverFound)
                     {
                         for(i = 0; i < channelList.length; i++)
@@ -476,10 +577,15 @@ function verifyChannelList()
     });
 }
 
+/**************/
+/* SERVER END */
+/**************/
+
 /*************************/
 /* DEBUG FUNCTIONS START */
 /*************************/
 
+//Displays all global connections
 function globalConnections()
 {
     pubnub.here_now(
@@ -492,6 +598,7 @@ function globalConnections()
     });
 }
 
+//Displays all connections
 function allConnections()
 {
     pubnub.here_now(
@@ -503,6 +610,7 @@ function allConnections()
     });
 }
 
+//Displays channel list
 function viewChannelList()
 {
     console.log("==========LIST OF UUID/CHANNEL PAIRS==========");
@@ -521,6 +629,20 @@ function viewChannelList()
     console.log("==============================================");
 }
 
+//Accepts a string and returns it as ascii codes
+function asciiEncode(string){
+    
+    result = "";
+    
+    for(i = 0; i < string.length; i++)
+    {
+        result = result + string.charCodeAt(i);
+    }
+    
+    return result;
+}
+
+//Shutdown the server
 function shutdown()
 {
     console.log("==========SHUTTING DOWN==========");
@@ -575,6 +697,7 @@ function shutdown()
     });
 }
 
+//Allows the server admin to access debug commands
 var stdin = process.openStdin();
 stdin.on('data', function(input)
 {
@@ -611,101 +734,6 @@ stdin.on('data', function(input)
 /***********************/
 /* DEBUG FUNCTIONS END */
 /***********************/
-
-/****************/
-/* SERVER START */
-/****************/
-
-console.log(" > [" + globalChannel + "] ATTEMPTING CONNECTION TO DATABASE");
-
-//Connect to the database
-database.connect(function(err){
-    if (err){
-        console.log(" > [" + globalChannel + "] ERROR CONNECTING TO DATABASE. SHUTTING DOWN!");
-        shutdown();
-    }
-    else
-    {
-        console.log(" > [" + globalChannel + "] CONNECTED TO DATABASE!");
-        updateUsernameList();
-    }
-});
-
-function updateUsernameList(){
-    database.query('SELECT Username FROM Users', function (err, rows, fields) {
-        if(err) throw err;
-        
-        console.log(" > [" + globalChannel + "] GETTING LIST OF USERS");
-        
-        userlist.length = 0;
-        for(i = 0; i < rows.length; i++){
-            userlist.push(rows[i].Username);
-        }
-        
-        console.log(" > [" + dbChannel + "] BROADCASTING DATABASE CHANGES");
-        
-        pubnub.publish({
-            channel: dbChannel,
-            message: {
-                "m_type" : "db_results",
-                "usernames" : userlist
-            }
-        });
-
-        createGlobalChannel();
-    });
-}
-
-function createGlobalChannel(){
-    pubnub.subscribe(
-    {
-        channel: globalChannel,
-        message: function(m)
-        {
-            console.log(" > [" + globalChannel + "] MESSAGE RECEIVED: " + JSON.stringify(m));
-        },
-        connect: function(m)
-        {
-            console.log(" > [" + globalChannel + "] CONNECTED TO GLOBAL CHANNEL");
-        },
-        error: function(error)
-        {
-            console.log(JSON.stringify(error));
-        },
-        presence: function(m)
-        {
-            console.log(" > [" + globalChannel + "] PRESENCE EVENT DETECTED: " + JSON.stringify(m));
-    
-            /* If a user joins the channel, allocate them a private channel */
-            if (m.uuid !== "SERVER" && m.action === "join")
-            {
-                broadcastNextChannel(m.uuid);
-            }
-        }
-    });
-    /* Check channel list every 2 minutes */
-    setInterval(function()
-    {
-        verifyChannelList();
-    }, 2 * 60 * 1000);
-}
-
-
-function asciiEncode(string){
-    
-    result = "";
-    
-    for(i = 0; i < string.length; i++)
-    {
-        result = result + string.charCodeAt(i);
-    }
-    
-    return result;
-}
-
-/**************/
-/* SERVER END */
-/**************/
 
 /*****************************************************/
 /*****************************************************/
